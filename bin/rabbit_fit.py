@@ -790,7 +790,7 @@ def fit(args, fitter, ws, mappings, dofit=True):
                         param, m,
                         args.scanRange, args.scanPoints, args.scanRangeUsePrefit
                     )
-                    ws.add_nll_scan_hist(f"{mapping_name}_{param}", x_mapping, dnll_values)
+                    ws.add_nll_scan_hist(f"{mapping_name}", x_mapping, dnll_values)
 
     if args.scan2D is not None:
         for param_tuple in args.scan2D:

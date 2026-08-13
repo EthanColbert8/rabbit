@@ -158,6 +158,26 @@ def plot_scan(
     return fig
 
 
+def get_param_value_variance(param, fitresult, h_params=None):
+    if h_params is None:
+        h_params = fitresult["parms"].get()
+
+    if param in h_params.axes["parms"]:
+        p = h_params[{"parms": param}]
+        return p.value, p.variance
+
+    mappings = fitresult.get("mappings", {})
+    if param not in mappings:
+        raise ValueError(f"Neither fit parameter nor known mapping: {param}")
+
+    (channel_result,) = mappings[param]["channels"].values()
+    h_mapping = channel_result["hist_postfit_inclusive"].get()
+    if h_mapping.size != 1:
+        raise ValueError(f"Mapping \"{param}\" is not a single value, but has {h_mapping.size} bins, expected 1 for a likelihood scan")
+
+    return h_mapping.values().reshape(-1)[0], h_mapping.variances().reshape(-1)[0]
+
+
 def main():
     args = make_parser().parse_args()
     outdir = output_tools.make_plot_dir(args.outpath, eoscp=args.eoscp)
@@ -194,12 +214,14 @@ def main():
             nlls = nlls[order] * 2  # -2ln(L)
 
     for param in parms:
-        p = h_params[{"parms": param}]
-        param_value = p.value
-        param_variance = p.variance
+        # p = h_params[{"parms": param}]
+        # param_value = p.value
+        # param_variance = p.variance
+        param_value, param_variance = get_param_value_variance(param, fitresult, h_params=h_params)
+
         h_scan = fitresult[f"nll_scan_{param}"].get()
 
-        if h_contour is not None:
+        if h_contour is not None and param in h_params.axes["parms"]:
             h_contour_param = h_contour[{"parms": param, "impacts": param}]
         else:
             h_contour_param = None

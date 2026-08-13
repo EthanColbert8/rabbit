@@ -2479,6 +2479,59 @@ class Fitter:
 
         return scan_vals, dnlls
 
+
+    def nll_scan_mapping(self, param, mapping, scan_range, scan_points, use_prefit=False):
+        # make a likelihood scan for a single parameter and propagate to a mapping
+        # assuming the likelihood is minimized
+
+        # freeze minimize which mean to not update it in the fit
+        self.freeze_params(param)
+
+        idx = np.where(self.parms.astype(str) == param)[0][0]
+
+        # store current state of x temporarily
+        xval = tf.identity(self.x)
+
+        param_offsets = np.linspace(0, scan_range, scan_points // 2 + 1)
+        if not use_prefit:
+            param_offsets *= self.cov[idx, idx].numpy() ** 0.5
+
+        nscans = 2 * len(param_offsets) - 1
+        dnlls = np.full(nscans, np.nan)
+        scan_vals = np.zeros(nscans)
+        mapped_vals = np.zeros(nscans)
+
+        # save delta nll w.r.t. global minimum
+        nll_best = self.reduced_nll().numpy()
+        # set central point
+        dnlls[nscans // 2] = 0
+        scan_vals[nscans // 2] = xval[idx].numpy()
+        # scan positive side and negative side independently to profit from previous step
+        for sign in [-1, 1]:
+            param_scan_values = xval[idx].numpy() + sign * param_offsets
+            for i, ixval in enumerate(param_scan_values):
+                if i == 0:
+                    continue
+
+                logger.debug(f"Now at i={i} x={ixval}")
+                self.x.assign(tf.tensor_scatter_nd_update(self.x, [[idx]], [ixval]))
+                self.fit()
+
+                j = nscans // 2 + sign * i
+                dnlls[j] = self.reduced_nll().numpy() - nll_best
+                scan_vals[j] = ixval
+
+                exp, _ = self.expected_events(mapping, inclusive=True, compute_variance=False)
+                mapped_vals[j] = exp.numpy().reshape(-1)[0]
+
+            # reset x to original state
+            self.x.assign(xval)
+
+        # let the parameter be free again
+        self.defreeze_params(param)
+        return scan_vals, mapped_vals, dnlls
+
+
     def nll_scan2D(self, param_tuple, scan_range, scan_points, use_prefit=False):
 
         # freeze minimize which mean to not update it in the fit

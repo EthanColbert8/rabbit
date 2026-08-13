@@ -86,6 +86,13 @@ def make_parser():
         help="run 2D likelihood scan on the specified variable pairs",
     )
     parser.add_argument(
+        "--scanMappings",
+        default=None,
+        type=str,
+        nargs="+",
+        help="propagate likelihood scan to quantities defined by the specified mapping(s), --scan must also be specified",
+    )
+    parser.add_argument(
         "--scanPoints",
         default=15,
         type=int,
@@ -544,7 +551,7 @@ def save_hists(args, mappings, fitter, ws, prefit=True, profile=False):
                 fitter.cov.assign(tf.constant(cov_prefit))
 
 
-def fit(args, fitter, ws, dofit=True):
+def fit(args, fitter, ws, mappings, dofit=True):
 
     edmval = None
 
@@ -766,6 +773,24 @@ def fit(args, fitter, ws, dofit=True):
                 x_scan,
                 dnll_values,
             )
+
+            if args.scanMappings is not None:
+                for mapping_name in args.scanMappings:
+                    logger.info(f"-delta log(L) scan over mapping {mapping_name}")
+
+                    # find mapping type specified by arg
+                    mapping_matches = [m for m in mappings if m.key.startswith(mapping_name)]
+                    if len(mapping_matches) < 1:
+                        raise RuntimeError(f"Mapping {mapping_name} not found in the list of mappings")
+                    if len(mapping_matches) > 1:
+                        logger.warning(f"Multiple mappings of type {mapping_name}, only using first one")
+                    m = mapping_matches[0]
+
+                    x_scan, x_mapping, dnll_values = fitter.nll_scan_mapping(
+                        param, m,
+                        args.scanRange, args.scanPoints, args.scanRangeUsePrefit
+                    )
+                    ws.add_nll_scan_hist(f"{mapping_name}_{param}", x_mapping, dnll_values)
 
     if args.scan2D is not None:
         for param_tuple in args.scan2D:
@@ -998,7 +1023,7 @@ def main():
 
                 if not args.prefitOnly:
                     ifitter.set_blinding_offsets(blind=blinded_fits[i])
-                    fit(args, ifitter, ws, dofit=ifit >= 0 and not args.noFit)
+                    fit(args, ifitter, ws, mappings=mappings, dofit=ifit >= 0 and not args.noFit)
                     fit_time.append(time.time())
 
                     if args.saveHists:

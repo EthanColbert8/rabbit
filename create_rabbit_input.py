@@ -28,7 +28,7 @@ def process_is_signal(process_name):
     return process_name in signal_processes
 
 def apply_boosted_cuts(histogram, prefix="transformer_"):
-    ttbar_mass = [900.0, 1500.0]
+    ttbar_mass = [800.0, 1500.0]
     cos_theta = [-0.4, 0.4]
     return histogram[
         hist.loc(ttbar_mass[0]):hist.loc(ttbar_mass[1]):sum, # ttbar mass
@@ -37,19 +37,27 @@ def apply_boosted_cuts(histogram, prefix="transformer_"):
         ...
     ].project(f"{prefix}cos_phiPrime")
 
+def get_templates_folder(reco="hybrid", nosc=False):
+    match reco.lower():
+        case "hybrid": return "4_vars_14_5_7_13hybrid2nosc-0" if nosc else "4_vars_14_5_7_13hybrid2-0"
+        case "mlb": return "4_vars_14_5_7_13mlb2nosc-0" if nosc else "4_vars_14_5_7_13mlb2-0"
+        case "transformer": return "4_vars_14_5_7_13transformer2nosc-0" if nosc else "4_vars_14_5_7_13transformer2-0"
+        case "gen": return "4_varsgen2nosc-0" if nosc else "4_varsgen2-0"
+    raise ValueError(f"Reconstruction \"{reco}\" not recognized (must be \"hybrid\", \"transformer\", \"mlb\", or \"gen\")")
+
 def main(args):
     hist_templates_dir = "/depot/cms/top/colberte/top-spincorr-framework/histogram_templates"
     channels = ["ee", "emu", "mumu"]
+    normal_hist_prefix = "" if args.reco.lower()=="mlb" else f"{args.reco}_"
 
     save_folder = args.outdir if (args.outdir is not None) else os.path.join(os.path.dirname(hist_templates_dir), "rabbit_templates")
     os.makedirs(save_folder, exist_ok=True)
 
-    # TODO: don't hard-code the middle bit
-    nominal_hists_dir = os.path.join(hist_templates_dir, "steering_1d_v1", "Nominal")
-    nosc_hists_dir = os.path.join(hist_templates_dir, "steering_1d_v1", "noSpinCorr")
+    nominal_hists_dir = os.path.join(hist_templates_dir, get_templates_folder(args.reco, nosc=False), "Nominal")
+    nosc_hists_dir = os.path.join(hist_templates_dir, get_templates_folder(args.reco, nosc=True), "noSpinCorr")
 
-    gen_nominal_hists_dir = os.path.join(hist_templates_dir, "steering_1d_gen", "Nominal")
-    gen_nosc_hists_dir = os.path.join(hist_templates_dir, "steering_1d_gen", "noSpinCorr")
+    gen_nominal_hists_dir = os.path.join(hist_templates_dir, get_templates_folder("gen", nosc=False), "Nominal")
+    gen_nosc_hists_dir = os.path.join(hist_templates_dir, get_templates_folder("gen", nosc=True), "noSpinCorr")
 
     writer = tensorwriter.TensorWriter(systematic_type="normal")
 
@@ -69,12 +77,11 @@ def main(args):
         gen_nominal_hists = load_histograms(gen_nominal_hists_dir, gen_nominal_files, channel=channel)
         gen_nosc_hists = load_histograms(gen_nosc_hists_dir, gen_nosc_files, channel=channel)
 
-        axes = apply_boosted_cuts(nominal_hists[signal_processes[0]]["Nominal", ...]).axes
+        axes = apply_boosted_cuts(nominal_hists[signal_processes[0]]["Nominal", ...], prefix=normal_hist_prefix).axes
         writer.add_channel(axes, name=channel)
-        
 
         for p, h in nominal_hists.items():
-            the_hist = apply_boosted_cuts(h["Nominal", ...])
+            the_hist = apply_boosted_cuts(h["Nominal", ...], prefix=normal_hist_prefix)
 
             logging.debug(f"Adding nominal process \"{p}\".")
             writer.add_process(the_hist, name=p, channel=channel, signal=process_is_signal(p))
@@ -87,8 +94,8 @@ def main(args):
 
             logging.info(f"Adding noSpinCorr systematic for signal process \"{p}\".")
 
-            the_hist = apply_boosted_cuts(h["noSpinCorr", ...])
-            nominal_hist = apply_boosted_cuts(nominal_hists[p]["Nominal", ...])
+            the_hist = apply_boosted_cuts(h["noSpinCorr", ...], prefix=normal_hist_prefix)
+            nominal_hist = apply_boosted_cuts(nominal_hists[p]["Nominal", ...], prefix=normal_hist_prefix)
 
             nosc_up_hist = (0.8 * nominal_hist) + (0.2 * the_hist)
             nosc_down_hist = (2.0 * nominal_hist) + (-1.0 * nosc_up_hist) # mirror up variation across nominal
@@ -132,11 +139,11 @@ def main(args):
         #     writer.add_norm_systematic(f"{p}_norm", p, "combined", 1.05)
 
         logging.info(f"Adding fake data taken from (0.98*nominal + 0.02*nosc) for channel \"{channel}\".")
-        fake_data_hist = (0.98 * apply_boosted_cuts(nominal_hists[signal_processes[0]]["Nominal", ...])) + (0.02 * apply_boosted_cuts(nosc_hists[signal_processes[0]]["noSpinCorr", ...]))
+        fake_data_hist = (0.98 * apply_boosted_cuts(nominal_hists[signal_processes[0]]["Nominal", ...], prefix=normal_hist_prefix)) + (0.02 * apply_boosted_cuts(nosc_hists[signal_processes[0]]["noSpinCorr", ...], prefix=normal_hist_prefix))
         for p in nominal_hists.keys():
             if (p == signal_processes[0]):
                 continue
-            fake_data_hist += apply_boosted_cuts(nominal_hists[p]["Nominal", ...])
+            fake_data_hist += apply_boosted_cuts(nominal_hists[p]["Nominal", ...], prefix=normal_hist_prefix)
         writer.add_data(fake_data_hist, channel)
 
     writer.write(save_folder, args.outname)
@@ -146,6 +153,7 @@ if (__name__ == "__main__"):
     parser = argparse.ArgumentParser()
     parser.add_argument("--outdir", type=str, default=None, help="Output directory. Default is \"./rabbit_templates\"")
     parser.add_argument("--outname", type=str, default="rabbit_input_nosc_combined.hdf5", help="Output filename. Default is \"rabbit_input_nosc_combined.hdf5\"")
+    parser.add_argument("--reco", type=str, default="hybrid", help="Name of reconstruction method to get templates from. Default is \"hybrid\"")
     parser.add_argument("--verbose", action="store_true", help="Enable debug-level logging")
     args = parser.parse_args()
 

@@ -2506,6 +2506,8 @@ class Fitter:
         # set central point
         dnlls[nscans // 2] = 0
         scan_vals[nscans // 2] = xval[idx].numpy()
+        exp, _ = self.expected_events(mapping, inclusive=True, compute_variance=False)
+        mapped_vals[nscans // 2] = exp.numpy().reshape(-1)[0]
         # scan positive side and negative side independently to profit from previous step
         for sign in [-1, 1]:
             param_scan_values = xval[idx].numpy() + sign * param_offsets
